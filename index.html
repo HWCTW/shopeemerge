@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF 合併工具 (4合1)</title>
+    <!-- 引入 pdf-lib 函式庫 -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 30px; text-align: center; background-color: #f5f7fa; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; background: white; border: 1px solid #ddd; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { margin-top: 0; color: #2c3e50; }
+        .file-upload-wrapper { margin: 25px 0; padding: 20px; border: 2px dashed #bdc3c7; border-radius: 8px; background-color: #ecf0f1; }
+        input[type="file"] { font-size: 16px; }
+        button { padding: 12px 24px; font-size: 16px; cursor: pointer; background-color: #3498db; color: white; border: none; border-radius: 6px; transition: background-color 0.3s; font-weight: bold; }
+        button:hover { background-color: #2980b9; }
+        #status { margin-top: 20px; font-weight: bold; font-size: 15px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🖨️ PDF 4合1 網頁版合併工具</h2>
+        <p>不需透過後端，純前端處理！請選擇您的 PDF 檔案 (建議 4 的倍數)，系統會將它們排列合併到 A4 大小的 PDF 中（左上、右上、左下、右下）。</p>
+        
+        <div class="file-upload-wrapper">
+            <input type="file" id="fileInput" multiple accept=".pdf">
+        </div>
+        
+        <button onclick="mergePDFs()">開始合併並匯出</button>
+        <div id="status"></div>
+    </div>
+
+    <script>
+        async function mergePDFs() {
+            const fileInput = document.getElementById('fileInput');
+            const statusDiv = document.getElementById('status');
+            
+            if (fileInput.files.length === 0) {
+                statusDiv.textContent = '⚠️ 請先選擇 PDF 檔案！';
+                statusDiv.style.color = '#e74c3c';
+                return;
+            }
+            
+            statusDiv.textContent = '⏳ 處理中，請稍候...';
+            statusDiv.style.color = '#f39c12';
+
+            try {
+                // 載入 PDFLib
+                const { PDFDocument } = PDFLib;
+                const mergedPdf = await PDFDocument.create();
+                
+                // 定義 A4 紙張大小 (單位：points)
+                const a4Width = 595.28;
+                const a4Height = 841.89;
+                
+                // 每個象限的大小 (A4的四分之一)
+                const quadWidth = a4Width / 2;
+                const quadHeight = a4Height / 2;
+
+                const files = Array.from(fileInput.files);
+                
+                // 每 4 個檔案為一組處理
+                for (let i = 0; i < files.length; i += 4) {
+                    // 加入一頁新的 A4 頁面
+                    const page = mergedPdf.addPage([a4Width, a4Height]);
+                    const batch = files.slice(i, i + 4);
+                    
+                    // 4個位置的座標 (pdf-lib 座標原點在左下角)
+                    const positions = [
+                        { x: 0, y: quadHeight },             // 左上
+                        { x: quadWidth, y: quadHeight },     // 右上
+                        { x: 0, y: 0 },                      // 左下
+                        { x: quadWidth, y: 0 }               // 右下
+                    ];
+
+                    for (let j = 0; j < batch.length; j++) {
+                        const file = batch[j];
+                        const arrayBuffer = await file.arrayBuffer();
+                        const pdf = await PDFDocument.load(arrayBuffer);
+                        
+                        // 擷取來源 PDF 的第一頁
+                        const [embeddedPage] = await mergedPdf.embedPdf(pdf, [0]);
+                        
+                        // 計算縮放比例以等比塞入象限
+                        const scaleX = quadWidth / embeddedPage.width;
+                        const scaleY = quadHeight / embeddedPage.height;
+                        const scale = Math.min(scaleX, scaleY) * 0.95; // 稍微留一點邊距 (95%)
+                        
+                        const scaledWidth = embeddedPage.width * scale;
+                        const scaledHeight = embeddedPage.height * scale;
+                        
+                        // 計算平移，讓內容在象限中置中
+                        const tx = positions[j].x + (quadWidth - scaledWidth) / 2;
+                        const ty = positions[j].y + (quadHeight - scaledHeight) / 2;
+                        
+                        // 將擷取的頁面畫到 A4 紙的指定位置
+                        page.drawPage(embeddedPage, {
+                            x: tx,
+                            y: ty,
+                            width: scaledWidth,
+                            height: scaledHeight
+                        });
+                    }
+                }
+
+                // 將 PDF 儲存為 bytes
+                const pdfBytes = await mergedPdf.save();
+                
+                // 建立 Blob 並觸發自動下載 (匯出功能)
+                const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+                const url = URL.createObjectURL(blob);
+                
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'Merged_4in1_Labels.pdf';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                statusDiv.textContent = '✅ 合併完成！已自動下載檔案。';
+                statusDiv.style.color = '#27ae60';
+            } catch (error) {
+                console.error(error);
+                statusDiv.textContent = '❌ 發生錯誤：' + error.message;
+                statusDiv.style.color = '#c0392b';
+            }
+        }
+    </script>
+</body>
+</html>
